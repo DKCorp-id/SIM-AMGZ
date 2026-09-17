@@ -34,7 +34,8 @@ function failForbidden(message = "Anda tidak berhak melihat konten ini."): never
 }
 
 function simSeedAllowed() {
-  const url = typeof process !== "undefined" ? process.env.DATABASE_URL?.trim() : "";
+  const url =
+    typeof process !== "undefined" ? process.env["DATABASE_URL"]?.trim() : "";
   if (!url) return true;
   return process.env.AMG_SIM_SEED === "true";
 }
@@ -84,13 +85,41 @@ export const ensureSimWorld = createServerFn({ method: "POST" }).handler(async (
 });
 
 export const getBootstrap = createServerFn({ method: "POST" }).middleware([authMiddleware]).handler(async ({ context }) => {
+  const sql = await getSql();
+  try {
+    const u = await sql<{ id: string; email: string | null; name: string }>`
+      select id, email, name from "user" where id = ${context.userId} limit 1
+    `;
+    const name = u[0]?.name?.trim() || "Admin";
+    const email = u[0]?.email ?? null;
+    await sql.query(
+      `insert into profiles (user_id, name, email, role, company_id, is_editor, is_kreator, is_sales, is_active, updated_at)
+       values ($1, $2, $3, 'admin', null, false, false, false, true, now())
+       on conflict (user_id) do update
+         set role = 'admin', is_active = true, email = coalesce(excluded.email, profiles.email),
+             name = excluded.name, updated_at = now()`,
+      [context.userId, name, email],
+    );
+  } catch {
+    /* tabel belum siap: tetap coba getActor */
+  }
   try {
     const actor = await getActor(context.userId);
-    const companies = await listCompanies();
+    let companies: Awaited<ReturnType<typeof listCompanies>> = [];
+    try {
+      companies = await listCompanies();
+    } catch {
+      companies = [];
+    }
     return { ok: true as const, actor, companies, landing: landingPath(actor) };
   } catch (e) {
     const name = e instanceof Error ? e.name : "";
-    const companies = await listCompanies();
+    let companies: Awaited<ReturnType<typeof listCompanies>> = [];
+    try {
+      companies = await listCompanies();
+    } catch {
+      companies = [];
+    }
     if (name === "INACTIVE") {
       return { ok: false as const, reason: "inactive" as const, companies };
     }
