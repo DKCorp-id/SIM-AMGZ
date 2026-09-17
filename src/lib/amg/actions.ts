@@ -22,6 +22,7 @@ import { landingPath } from "./types";
 import { seedSimWorld } from "./sim-seed";
 import { SIM_ACCOUNTS } from "./sim-cast";
 import { consumeAccessToken, ensureCredentialUser, issueAccessToken, setCredentialPassword } from "./access";
+import { seedLiteIfEmpty, seedLiteWorld, wipeLiteKeepAdmin } from "./lite-seed";
 
 function fail(message: string): never {
   throw new Error(message);
@@ -79,28 +80,30 @@ export const ensureSimWorld = createServerFn({ method: "POST" }).handler(async (
 });
 
 export const getBootstrap = createServerFn({ method: "POST" }).middleware([authMiddleware]).handler(async ({ context }) => {
+  async function pack(actor: Awaited<ReturnType<typeof getActor>>) {
+    if (actor.isAdmin) {
+      try {
+        await seedLiteIfEmpty(actor.userId);
+      } catch {
+        /* seed opsional */
+      }
+    }
+    let companies: Awaited<ReturnType<typeof listCompanies>> = [];
+    try {
+      companies = await listCompanies();
+    } catch {
+      companies = [];
+    }
+    return { ok: true as const, actor, companies, landing: landingPath(actor) };
+  }
   try {
     try {
-      const actor = await getActor(context.userId);
-      let companies: Awaited<ReturnType<typeof listCompanies>> = [];
-      try {
-        companies = await listCompanies();
-      } catch {
-        companies = [];
-      }
-      return { ok: true as const, actor, companies, landing: landingPath(actor) };
+      return await pack(await getActor(context.userId));
     } catch (inner) {
       const innerName = inner instanceof Error ? inner.name : "";
       if (innerName !== "NO_PROFILE") throw inner;
       await ensureAdminProfile(context.userId);
-      const actor = await getActor(context.userId);
-      let companies: Awaited<ReturnType<typeof listCompanies>> = [];
-      try {
-        companies = await listCompanies();
-      } catch {
-        companies = [];
-      }
-      return { ok: true as const, actor, companies, landing: landingPath(actor) };
+      return await pack(await getActor(context.userId));
     }
   } catch (e) {
     const errName = e instanceof Error ? e.name : "";
@@ -1458,4 +1461,18 @@ export const seedDemo = createServerFn({ method: "POST" }).middleware([authMiddl
   }
 
   return { ok: true };
+});
+
+export const seedLite = createServerFn({ method: "POST" }).middleware([authMiddleware]).handler(async ({ context }) => {
+  const actor = await getActor(context.userId);
+  if (!actor.isAdmin) fail("Hanya Admin.");
+  await seedLiteWorld(actor.userId);
+  return { ok: true as const };
+});
+
+export const wipeLite = createServerFn({ method: "POST" }).middleware([authMiddleware]).handler(async ({ context }) => {
+  const actor = await getActor(context.userId);
+  if (!actor.isAdmin) fail("Hanya Admin.");
+  await wipeLiteKeepAdmin(actor.userId);
+  return { ok: true as const };
 });
