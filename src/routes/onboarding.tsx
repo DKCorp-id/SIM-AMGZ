@@ -13,7 +13,7 @@ function Onboarding() {
   const { user, isPending } = useCurrentUserState();
   const nav = useNavigate();
   const [checking, setChecking] = useState(true);
-  const [needsAdmin, setNeedsAdmin] = useState(false);
+  const [needsAdmin, setNeedsAdmin] = useState(true);
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
@@ -24,12 +24,18 @@ function Onboarding() {
       .then(([b, s]) => {
         if (b.ok) void nav({ to: b.landing });
         else {
-          setNeedsAdmin(s.needsFirstAdmin);
+          setNeedsAdmin(s.needsFirstAdmin || b.reason === "no_profile");
           setName(user.displayName ?? "");
+          if ("error" in b && b.error) setErr(b.error);
           setChecking(false);
         }
       })
-      .catch(() => setChecking(false));
+      .catch((e) => {
+        setErr(e instanceof Error ? e.message : "Gagal memuat akses.");
+        setName(user.displayName ?? "");
+        setNeedsAdmin(true);
+        setChecking(false);
+      });
   }, [user, nav]);
 
   if (isPending || checking) return <LoadingScreen />;
@@ -52,31 +58,19 @@ function Onboarding() {
     <main className="grid min-h-screen place-items-center bg-bg px-5 py-10">
       <div className="w-full max-w-md space-y-4 rounded-[28px] border border-line bg-bg-elev p-8 text-center">
         <p className="text-[11px] uppercase tracking-[0.22em] text-muted">Akses</p>
-        {needsAdmin ? (
-          <>
-            <h1 className="font-display text-3xl">Admin pertama</h1>
-            <p className="text-sm text-muted">
-              Belum ada Admin di AMG Ops. Akun yang baru masuk ini bisa mengambil peran Admin platform.
-            </p>
-            <div className="text-left">
-              <Field label="Nama">
-                <Input required minLength={2} value={name} onChange={(e) => setName(e.target.value)} />
-              </Field>
-            </div>
-            {err ? <p className="text-sm text-danger">{err}</p> : null}
-            <Button className="w-full" disabled={busy} onClick={() => void claim()}>
-              {busy ? "Menyimpan…" : "Jadikan Admin pertama"}
-            </Button>
-          </>
-        ) : (
-          <>
-            <h1 className="font-display text-3xl">Belum diundang</h1>
-            <p className="text-sm text-muted">
-              Akun ini belum punya peran di AMG Ops. Minta Admin mengirim undangan, lalu set kata sandi dari tautan
-              tersebut.
-            </p>
-          </>
-        )}
+        <h1 className="font-display text-3xl">{needsAdmin ? "Admin pertama" : "Lengkapi akses"}</h1>
+        <p className="text-sm text-muted">
+          Akun ini akan menjadi Admin platform AMG Ops. Ketuk tombol di bawah, lalu Anda bisa mengundang tim.
+        </p>
+        <div className="text-left">
+          <Field label="Nama">
+            <Input required minLength={2} value={name} onChange={(e) => setName(e.target.value)} />
+          </Field>
+        </div>
+        {err ? <p className="text-sm text-danger">{err}</p> : null}
+        <Button className="w-full" disabled={busy} onClick={() => void claim()}>
+          {busy ? "Menyimpan…" : "Masuk sebagai Admin"}
+        </Button>
         <div className="flex justify-center">
           <UserButton />
         </div>
