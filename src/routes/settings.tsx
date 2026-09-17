@@ -3,7 +3,7 @@ import { RedirectToSignIn } from "@/lib/auth/gates";
 import { AppShell, LoadingScreen, PageTitle } from "@/components/app-shell";
 import { Button, Field, Input } from "@/components/ui";
 import { useActorGate } from "@/lib/amg/use-actor";
-import { getSettings, saveKpi, savePillar, saveTarget, saveThreshold, seedDemo } from "@/lib/amg/actions";
+import { getSettings, saveKpi, savePillar, saveTarget, saveThreshold, seedDemo, seedLite, wipeLite } from "@/lib/amg/actions";
 import { METRICS, PLATFORM_LABEL, currentYearMonth } from "@/lib/amg/constants";
 import { formatRp } from "@/lib/amg/format";
 import { SIM_UI } from "@/lib/amg/runtime";
@@ -19,6 +19,8 @@ function SettingsPage() {
   const { actor, ready, user, isPending } = useActorGate();
   const [tab, setTab] = useState<"pilar" | "kpi" | "target" | "threshold">("pilar");
   const [data, setData] = useState<Awaited<ReturnType<typeof getSettings>> | null>(null);
+  const [opsMsg, setOpsMsg] = useState<string | null>(null);
+  const [opsBusy, setOpsBusy] = useState(false);
   const year = currentYearMonth().slice(0, 4);
 
   async function reload() {
@@ -45,19 +47,61 @@ function SettingsPage() {
         kicker="Admin"
         title="Pengaturan"
         action={
-          SIM_UI ? (
+          <div className="flex flex-wrap gap-2">
             <Button
               tone="line"
+              disabled={opsBusy}
               onClick={async () => {
-                await seedDemo();
-                await reload();
+                setOpsBusy(true);
+                setOpsMsg(null);
+                try {
+                  await seedLite();
+                  await reload();
+                  setOpsMsg("Data latihan diisi: 4 brand, beberapa konten & lead. Nanti bisa dihapus, Admin tetap ada.");
+                } catch (e) {
+                  setOpsMsg(e instanceof Error ? e.message : "Gagal mengisi data latihan.");
+                } finally {
+                  setOpsBusy(false);
+                }
               }}
             >
-              Isi target contoh
+              Isi data latihan
             </Button>
-          ) : undefined
+            <Button
+              tone="line"
+              disabled={opsBusy}
+              onClick={async () => {
+                if (!window.confirm("Hapus semua konten, lead, dan user selain Admin? Brand tetap.")) return;
+                setOpsBusy(true);
+                setOpsMsg(null);
+                try {
+                  await wipeLite();
+                  await reload();
+                  setOpsMsg("Data latihan dihapus. Sisakan akun Admin.");
+                } catch (e) {
+                  setOpsMsg(e instanceof Error ? e.message : "Gagal menghapus.");
+                } finally {
+                  setOpsBusy(false);
+                }
+              }}
+            >
+              Hapus latihan, sisakan Admin
+            </Button>
+            {SIM_UI ? (
+              <Button
+                tone="line"
+                onClick={async () => {
+                  await seedDemo();
+                  await reload();
+                }}
+              >
+                Isi target contoh
+              </Button>
+            ) : null}
+          </div>
         }
       />
+      {opsMsg ? <p className="mb-4 text-sm text-muted">{opsMsg}</p> : null}
       <div className="mb-6 flex flex-wrap gap-2">
         {(
           [
