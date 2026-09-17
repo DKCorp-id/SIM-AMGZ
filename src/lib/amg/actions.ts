@@ -2,7 +2,7 @@ import { createServerFn } from "@tanstack/react-start";
 import { authMiddleware } from "@/lib/auth/middleware";
 import { getSql } from "@/lib/db";
 import { z } from "zod";
-import { getActor, listCompanies } from "./actor";
+import { getActor, listCompanies, ensureAdminProfile } from "./actor";
 import {
   ACTIVITY_JENIS,
   CONTENT_STATUSES,
@@ -57,21 +57,7 @@ export const claimFirstAdmin = createServerFn({ method: "POST" })
   .validator(z.object({ name: z.string().trim().min(2).max(80) }))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    const mine = await sql<{ user_id: string }>`
-      select user_id from profiles where user_id = ${context.userId} limit 1
-    `;
-    if (mine[0]) fail("Profil sudah ada.");
-    const u = await sql<{ email: string | null }>`
-      select email from "user" where id = ${context.userId} limit 1
-    `;
-    const inserted = await sql.query<{ user_id: string }>(
-      `insert into profiles (user_id, name, email, role, company_id, is_editor, is_kreator, is_sales, is_active, updated_at)
-       select $1, $2, $3, 'admin', null, false, false, false, true, now()
-       where not exists (select 1 from profiles where role = 'admin' and is_active = true)
-       returning user_id`,
-      [context.userId, data.name, u[0]?.email ?? null],
-    );
-    if (!inserted[0]) fail("Setup awal sudah selesai. Minta undangan Admin atau GM.");
+    await ensureAdminProfile(context.userId);
     await sql`update "user" set name = ${data.name}, "updatedAt" = now() where id = ${context.userId}`;
     return { ok: true as const };
   });
@@ -85,25 +71,8 @@ export const ensureSimWorld = createServerFn({ method: "POST" }).handler(async (
 });
 
 export const getBootstrap = createServerFn({ method: "POST" }).middleware([authMiddleware]).handler(async ({ context }) => {
-  const sql = await getSql();
   try {
-    const u = await sql<{ id: string; email: string | null; name: string }>`
-      select id, email, name from "user" where id = ${context.userId} limit 1
-    `;
-    const name = u[0]?.name?.trim() || "Admin";
-    const email = u[0]?.email ?? null;
-    await sql.query(
-      `insert into profiles (user_id, name, email, role, company_id, is_editor, is_kreator, is_sales, is_active, updated_at)
-       values ($1, $2, $3, 'admin', null, false, false, false, true, now())
-       on conflict (user_id) do update
-         set role = 'admin', is_active = true, email = coalesce(excluded.email, profiles.email),
-             name = excluded.name, updated_at = now()`,
-      [context.userId, name, email],
-    );
-  } catch {
-    /* tabel belum siap: tetap coba getActor */
-  }
-  try {
+    await ensureAdminProfile(context.userId);
     const actor = await getActor(context.userId);
     let companies: Awaited<ReturnType<typeof listCompanies>> = [];
     try {
@@ -113,17 +82,18 @@ export const getBootstrap = createServerFn({ method: "POST" }).middleware([authM
     }
     return { ok: true as const, actor, companies, landing: landingPath(actor) };
   } catch (e) {
-    const name = e instanceof Error ? e.name : "";
+    const errName = e instanceof Error ? e.name : "";
+    const errMsg = e instanceof Error ? e.message : String(e);
     let companies: Awaited<ReturnType<typeof listCompanies>> = [];
     try {
       companies = await listCompanies();
     } catch {
       companies = [];
     }
-    if (name === "INACTIVE") {
-      return { ok: false as const, reason: "inactive" as const, companies };
+    if (errName === "INACTIVE") {
+      return { ok: false as const, reason: "inactive" as const, companies, error: errMsg };
     }
-    return { ok: false as const, reason: "no_profile" as const, companies };
+    return { ok: false as const, reason: "no_profile" as const, companies, error: errMsg };
   }
 });
 
