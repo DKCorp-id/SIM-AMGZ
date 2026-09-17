@@ -15,14 +15,11 @@ export async function getActor(userId: string): Promise<Actor> {
     is_kreator: boolean;
     is_sales: boolean;
     is_active: boolean;
-    company_name: string | null;
   }>`
-    select p.user_id, p.name, p.email, p.role, p.company_id,
-           p.is_editor, p.is_kreator, p.is_sales, p.is_active,
-           c.name as company_name
-    from profiles p
-    left join companies c on c.id = p.company_id
-    where p.user_id = ${userId}
+    select user_id, name, email, role, company_id,
+           is_editor, is_kreator, is_sales, is_active
+    from profiles
+    where user_id = ${userId}
     limit 1
   `;
   const r = rows[0];
@@ -30,6 +27,17 @@ export async function getActor(userId: string): Promise<Actor> {
     const err = new Error("NO_PROFILE");
     err.name = "NO_PROFILE";
     throw err;
+  }
+  let companyName: string | null = null;
+  if (r.company_id) {
+    try {
+      const c = await sql<{ name: string }>`
+        select name from companies where id = ${r.company_id} limit 1
+      `;
+      companyName = c[0]?.name ?? null;
+    } catch {
+      companyName = null;
+    }
   }
   const p: Profile = {
     userId: r.user_id,
@@ -41,7 +49,7 @@ export async function getActor(userId: string): Promise<Actor> {
     isKreator: !!r.is_kreator,
     isSales: !!r.is_sales,
     isActive: r.is_active !== false,
-    companyName: r.company_name,
+    companyName,
   };
   if (!p.isActive) {
     const err = new Error("INACTIVE");
@@ -51,12 +59,62 @@ export async function getActor(userId: string): Promise<Actor> {
   return asActor(p);
 }
 
+async function ensureTables(sql: Awaited<ReturnType<typeof getSql>>) {
+  await sql.query(`
+    create table if not exists companies (
+      id text primary key,
+      name text not null,
+      slug text not null unique,
+      platforms text not null,
+      is_active boolean not null default true,
+      created_at timestamptz not null default now()
+    )
+  `);
+  await sql.query(`
+    create table if not exists profiles (
+      user_id text primary key,
+      name text not null,
+      email text,
+      role text,
+      company_id text,
+      is_editor boolean not null default false,
+      is_kreator boolean not null default false,
+      is_sales boolean not null default false,
+      is_active boolean not null default true,
+      created_at timestamptz not null default now(),
+      updated_at timestamptz not null default now()
+    )
+  `);
+  try {
+    await sql.query("alter table if exists profiles disable row level security");
+    await sql.query("alter table if exists companies disable row level security");
+  } catch {
+    /* RLS ops optional */
+  }
+  try {
+    await sql.query("grant all on table profiles to public");
+    await sql.query("grant all on table companies to public");
+  } catch {
+    /* grants optional */
+  }
+}
+
+/** Pastikan userId punya baris profiles. Admin pertama ditautkan ulang jika ID sesi beda. */
 export async function ensureAdminProfile(userId: string, emailHint?: string | null) {
   const sql = await getSql();
+  await ensureTables(sql);
+
   const mine = await sql<{ user_id: string }>`
     select user_id from profiles where user_id = ${userId} limit 1
   `;
-  if (mine[0]) return;
+  if (mine[0]) {
+    await sql`
+      update profiles
+      set role = 'admin', is_active = true, updated_at = now()
+      where user_id = ${userId} and (role is distinct from 'admin' or is_active is distinct from true)
+    `;
+    return;
+  }
 
   const u = await sql<{ email: string | null; name: string | null }>`
     select email, name from "user" where id = ${userId} limit 1
@@ -67,7 +125,7 @@ export async function ensureAdminProfile(userId: string, emailHint?: string | nu
   if (email) {
     await sql`
       update profiles
-      set user_id = ${userId}, name = ${name}, email = ${email}, is_active = true, updated_at = now()
+      set user_id = ${userId}, name = ${name}, email = ${email}, role = 'admin', is_active = true, updated_at = now()
       where lower(email) = lower(${email})
     `;
   }
