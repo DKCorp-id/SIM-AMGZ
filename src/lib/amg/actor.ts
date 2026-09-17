@@ -1,6 +1,7 @@
 import { getSql } from "@/lib/db";
 import { asActor, type Actor, type Company, type Profile } from "./types";
 import { parsePlatforms } from "./format";
+import { upsertOfficialBrands } from "./lite-seed";
 
 export async function getActor(userId: string): Promise<Actor> {
   const sql = await getSql();
@@ -90,15 +91,7 @@ async function ensureTables(sql: Awaited<ReturnType<typeof getSql>>) {
   } catch {
     /* RLS ops optional */
   }
-  await sql.query(`
-    insert into companies (id, name, slug, platforms, is_active)
-    values
-      ('amazing-malang', 'Amazing Malang', 'amazing-malang', 'instagram,tiktok,facebook', true),
-      ('ame', 'AME', 'ame', 'instagram,tiktok', true),
-      ('mata-malang', 'Mata Malang', 'mata-malang', 'instagram,tiktok,youtube', true),
-      ('salt-and-sour', 'Salt & Sour', 'salt-and-sour', 'instagram,tiktok', true)
-    on conflict (id) do nothing
-  `);
+  await upsertOfficialBrands();
 }
 
 /**
