@@ -4,7 +4,6 @@ import { parsePlatforms } from "./format";
 
 export async function getActor(userId: string): Promise<Actor> {
   const sql = await getSql();
-  await ensureAdminProfile(userId);
   const rows = await sql<{
     user_id: string;
     name: string;
@@ -91,15 +90,21 @@ async function ensureTables(sql: Awaited<ReturnType<typeof getSql>>) {
   } catch {
     /* RLS ops optional */
   }
-  try {
-    await sql.query("grant all on table profiles to public");
-    await sql.query("grant all on table companies to public");
-  } catch {
-    /* grants optional */
-  }
+  await sql.query(`
+    insert into companies (id, name, slug, platforms, is_active)
+    values
+      ('amazing-malang', 'Amazing Malang', 'amazing-malang', 'instagram,tiktok,facebook', true),
+      ('ame', 'AME', 'ame', 'instagram,tiktok', true),
+      ('mata-malang', 'Mata Malang', 'mata-malang', 'instagram,tiktok,youtube', true),
+      ('salt-and-sour', 'Salt & Sour', 'salt-and-sour', 'instagram,tiktok', true)
+    on conflict (id) do nothing
+  `);
 }
 
-/** Pastikan userId punya baris profiles. Admin pertama ditautkan ulang jika ID sesi beda. */
+/**
+ * Hubungkan sesi login ke profil yang sudah ada, atau buat Admin pertama
+ * jika database masih kosong. Tidak menaikkan Editor/Kreator/Sales jadi Admin.
+ */
 export async function ensureAdminProfile(userId: string, emailHint?: string | null) {
   const sql = await getSql();
   await ensureTables(sql);
@@ -107,14 +112,7 @@ export async function ensureAdminProfile(userId: string, emailHint?: string | nu
   const mine = await sql<{ user_id: string }>`
     select user_id from profiles where user_id = ${userId} limit 1
   `;
-  if (mine[0]) {
-    await sql`
-      update profiles
-      set role = 'admin', is_active = true, updated_at = now()
-      where user_id = ${userId} and (role is distinct from 'admin' or is_active is distinct from true)
-    `;
-    return;
-  }
+  if (mine[0]) return;
 
   const u = await sql<{ email: string | null; name: string | null }>`
     select email, name from "user" where id = ${userId} limit 1
@@ -125,44 +123,23 @@ export async function ensureAdminProfile(userId: string, emailHint?: string | nu
   if (email) {
     await sql`
       update profiles
-      set user_id = ${userId}, name = ${name}, email = ${email}, role = 'admin', is_active = true, updated_at = now()
+      set user_id = ${userId}, name = ${name}, email = ${email}, is_active = true, updated_at = now()
       where lower(email) = lower(${email})
     `;
-  }
-
-  const again = await sql<{ user_id: string }>`
-    select user_id from profiles where user_id = ${userId} limit 1
-  `;
-  if (again[0]) return;
-
-  const admins = await sql<{ user_id: string }>`
-    select user_id
-    from profiles
-    where role = 'admin' and is_active = true
-    order by created_at asc
-    limit 1
-  `;
-  if (admins[0] && admins[0].user_id !== userId) {
-    await sql`
-      update profiles
-      set user_id = ${userId}, email = coalesce(${email}, email), name = ${name}, is_active = true, updated_at = now()
-      where user_id = ${admins[0].user_id}
-    `;
-    const linked = await sql<{ user_id: string }>`
+    const relinked = await sql<{ user_id: string }>`
       select user_id from profiles where user_id = ${userId} limit 1
     `;
-    if (linked[0]) return;
+    if (relinked[0]) return;
   }
 
-  await sql`
-    insert into companies (id, name, slug, platforms, is_active)
-    values
-      ('amazing-malang', 'Amazing Malang', 'amazing-malang', 'instagram,tiktok,facebook', true),
-      ('ame', 'AME', 'ame', 'instagram,tiktok', true),
-      ('mata-malang', 'Mata Malang', 'mata-malang', 'instagram,tiktok,youtube', true),
-      ('salt-and-sour', 'Salt & Sour', 'salt-and-sour', 'instagram,tiktok', true)
-    on conflict (id) do nothing
+  const adminCount = await sql<{ n: number }>`
+    select count(*)::int as n from profiles where role = 'admin' and is_active = true
   `;
+  if ((adminCount[0]?.n ?? 0) > 0) {
+    const err = new Error("NO_PROFILE");
+    err.name = "NO_PROFILE";
+    throw err;
+  }
 
   await sql`
     insert into profiles (
