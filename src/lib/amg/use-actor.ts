@@ -25,7 +25,10 @@ export function useActorGate() {
     void getBootstrap()
       .then((b) => {
         if (!b.ok && b.reason === "no_profile") {
-          void nav({ to: "/onboarding" });
+          setReady(true);
+          if (typeof window === "undefined" || window.location.pathname !== "/onboarding") {
+            void nav({ to: "/onboarding" });
+          }
           return;
         }
         if (!b.ok && b.reason === "inactive") {
