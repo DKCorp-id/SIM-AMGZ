@@ -24,9 +24,9 @@ function Onboarding() {
       .then(([b, s]) => {
         if (b.ok) void nav({ to: b.landing });
         else {
-          setNeedsAdmin(s.needsFirstAdmin || b.reason === "no_profile");
+          setNeedsAdmin(s.needsFirstAdmin);
           setName(user.displayName ?? "");
-          if ("error" in b && b.error) setErr(b.error);
+          if ("error" in b && b.error && b.error !== "NO_PROFILE") setErr(b.error);
           setChecking(false);
         }
       })
@@ -58,19 +58,29 @@ function Onboarding() {
     <main className="grid min-h-screen place-items-center bg-bg px-5 py-10">
       <div className="w-full max-w-md space-y-4 rounded-[28px] border border-line bg-bg-elev p-8 text-center">
         <p className="text-[11px] uppercase tracking-[0.22em] text-muted">Akses</p>
-        <h1 className="font-display text-3xl">{needsAdmin ? "Admin pertama" : "Lengkapi akses"}</h1>
+        <h1 className="font-display text-3xl">{needsAdmin ? "Admin pertama" : "Belum diundang"}</h1>
         <p className="text-sm text-muted">
-          Akun ini akan menjadi Admin platform AMG Ops. Ketuk tombol di bawah, lalu Anda bisa mengundang tim.
+          {needsAdmin
+            ? "Akun ini akan menjadi Admin platform AMG Ops. Ketuk tombol di bawah, lalu Anda bisa mengundang tim."
+            : "Akun ini belum punya peran. Minta Admin mengirim undangan, lalu set kata sandi dari tautan tersebut."}
         </p>
-        <div className="text-left">
-          <Field label="Nama">
-            <Input required minLength={2} value={name} onChange={(e) => setName(e.target.value)} />
-          </Field>
-        </div>
-        {err ? <p className="text-sm text-danger">{err}</p> : null}
-        <Button className="w-full" disabled={busy} onClick={() => void claim()}>
-          {busy ? "Menyimpan…" : "Masuk sebagai Admin"}
-        </Button>
+        {needsAdmin ? (
+          <>
+            <div className="text-left">
+              <Field label="Nama">
+                <Input required minLength={2} value={name} onChange={(e) => setName(e.target.value)} />
+              </Field>
+            </div>
+            {err ? <p className="text-sm text-danger">{err}</p> : null}
+            <Button className="w-full" disabled={busy} onClick={() => void claim()}>
+              {busy ? "Menyimpan…" : "Masuk sebagai Admin"}
+            </Button>
+          </>
+        ) : (
+          <>
+            {err ? <p className="text-sm text-danger">{err}</p> : null}
+          </>
+        )}
         <div className="flex justify-center">
           <UserButton />
         </div>
