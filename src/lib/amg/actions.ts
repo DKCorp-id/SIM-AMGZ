@@ -57,7 +57,15 @@ export const claimFirstAdmin = createServerFn({ method: "POST" })
   .validator(z.object({ name: z.string().trim().min(2).max(80) }))
   .handler(async ({ context, data }) => {
     const sql = await getSql();
-    await ensureAdminProfile(context.userId);
+    try {
+      await ensureAdminProfile(context.userId);
+    } catch (e) {
+      if (e instanceof Error && e.name === "NO_PROFILE") {
+        fail("Setup awal sudah selesai. Minta undangan Admin atau GM.");
+      }
+      throw e;
+    }
+    await sql`update profiles set name = ${data.name}, updated_at = now() where user_id = ${context.userId}`;
     await sql`update "user" set name = ${data.name}, "updatedAt" = now() where id = ${context.userId}`;
     return { ok: true as const };
   });
@@ -72,15 +80,28 @@ export const ensureSimWorld = createServerFn({ method: "POST" }).handler(async (
 
 export const getBootstrap = createServerFn({ method: "POST" }).middleware([authMiddleware]).handler(async ({ context }) => {
   try {
-    await ensureAdminProfile(context.userId);
-    const actor = await getActor(context.userId);
-    let companies: Awaited<ReturnType<typeof listCompanies>> = [];
     try {
-      companies = await listCompanies();
-    } catch {
-      companies = [];
+      const actor = await getActor(context.userId);
+      let companies: Awaited<ReturnType<typeof listCompanies>> = [];
+      try {
+        companies = await listCompanies();
+      } catch {
+        companies = [];
+      }
+      return { ok: true as const, actor, companies, landing: landingPath(actor) };
+    } catch (inner) {
+      const innerName = inner instanceof Error ? inner.name : "";
+      if (innerName !== "NO_PROFILE") throw inner;
+      await ensureAdminProfile(context.userId);
+      const actor = await getActor(context.userId);
+      let companies: Awaited<ReturnType<typeof listCompanies>> = [];
+      try {
+        companies = await listCompanies();
+      } catch {
+        companies = [];
+      }
+      return { ok: true as const, actor, companies, landing: landingPath(actor) };
     }
-    return { ok: true as const, actor, companies, landing: landingPath(actor) };
   } catch (e) {
     const errName = e instanceof Error ? e.name : "";
     const errMsg = e instanceof Error ? e.message : String(e);
