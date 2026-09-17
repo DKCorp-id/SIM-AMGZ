@@ -46,7 +46,10 @@ export function useActorGate() {
         }
       })
       .catch(() => {
-        void nav({ to: "/onboarding" });
+        setReady(true);
+        if (typeof window === "undefined" || window.location.pathname !== "/onboarding") {
+          void nav({ to: "/onboarding" });
+        }
       });
   }, [user, isPending, nav]);
 
