@@ -21,10 +21,34 @@ export async function getActor(userId: string): Promise<Actor> {
            c.name as company_name
     from profiles p
     left join companies c on c.id = p.company_id
-    where p.user_id = ${userId}
+        where p.user_id = ${userId}
     limit 1
   `;
-  const r = rows[0];
+  let r = rows[0];
+  if (!r) {
+    const u = await sql<{ email: string | null }>`
+      select email from "user" where id = ${userId} limit 1
+    `;
+    const email = u[0]?.email?.trim();
+    if (email) {
+      await sql`
+        update profiles
+        set user_id = ${userId}, updated_at = now()
+        where lower(email) = lower(${email})
+          and user_id <> ${userId}
+      `;
+      const again = await sql<typeof rows[0]>`
+        select p.user_id, p.name, p.email, p.role, p.company_id,
+               p.is_editor, p.is_kreator, p.is_sales, p.is_active,
+               c.name as company_name
+        from profiles p
+        left join companies c on c.id = p.company_id
+        where p.user_id = ${userId}
+        limit 1
+      `;
+      r = again[0];
+    }
+  }
   if (!r) {
     const err = new Error("NO_PROFILE");
     err.name = "NO_PROFILE";
